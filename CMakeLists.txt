@@ -5,6 +5,9 @@ project(ssb64 LANGUAGES C CXX)
 # Android needs ASM for the aarch64 coroutine context-switch
 # (port/coroutine_aarch64.S). Enable it before any add_library/add_executable
 # call sees an .S source. ASM is preprocessed by clang on the way through.
+# iOS does not need this: unlike bionic, the iOS SDK does ship working
+# getcontext/makecontext/swapcontext, so it uses coroutine_posix.cpp like
+# every other POSIX target.
 if (CMAKE_SYSTEM_NAME STREQUAL "Android")
     enable_language(ASM)
 endif()
@@ -14,8 +17,13 @@ endif()
 # port/mods sources, the no-inline linkage tweaks, the post-build .tcc/ staging,
 # and the in-engine call sites (#ifndef DISABLE_SCRIPTING). Forced ON for
 # Android: funchook/TinyCC have no Android target and the loader is desktop-only.
+# iOS: same lack of a funchook target (its CMake resolves src/funchook_.c to
+# nothing and the generate step fails), and the backend could not work anyway —
+# the hook installer needs writable+executable memory, which iOS refuses to
+# grant. The macOS build gets it via an rwx __TEXT maxprot re-sign with JIT
+# entitlements; there is no iOS equivalent.
 # Set BEFORE add_subdirectory(libultraship) so the engine half sees it too.
-if (CMAKE_SYSTEM_NAME STREQUAL "Android")
+if (CMAKE_SYSTEM_NAME STREQUAL "Android" OR CMAKE_SYSTEM_NAME STREQUAL "iOS")
     set(DISABLE_SCRIPTING ON CACHE BOOL "Disable the mod system (scripting + hooks)" FORCE)
 endif()
 
