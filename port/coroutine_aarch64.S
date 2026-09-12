@@ -27,6 +27,16 @@
 // The 8-byte pad at offset 104 keeps d8..d15 at 16-byte alignment, which
 // is required for stp/ldp pair access on aarch64.
 
+// Mach-O (Apple: macOS, iOS, tvOS) prefixes every C symbol with an
+// underscore; ELF (Linux, Android) does not. Assembly defining or calling
+// C-visible symbols has to match, or the link fails with the name the
+// compiler actually emitted. SYM() paves over the difference.
+#if defined(__APPLE__)
+#define SYM(name) _##name
+#else
+#define SYM(name) name
+#endif
+
 #if defined(__aarch64__)
 
     .text
@@ -40,11 +50,11 @@
 // pauses at the instruction after its caller's bl to this function;
 // when something later swaps back into "from", that instruction
 // re-executes the ret below.
-    .globl  port_coroutine_swap
+    .globl  SYM(port_coroutine_swap)
 #if defined(__ELF__)
-    .type   port_coroutine_swap, %function
+    .type   SYM(port_coroutine_swap), %function
 #endif
-port_coroutine_swap:
+SYM(port_coroutine_swap):
     // Save "from" (x0)
     stp     x19, x20, [x0, #0]
     stp     x21, x22, [x0, #16]
@@ -75,7 +85,7 @@ port_coroutine_swap:
 
     ret
 #if defined(__ELF__)
-    .size   port_coroutine_swap, .-port_coroutine_swap
+    .size   SYM(port_coroutine_swap), .-SYM(port_coroutine_swap)
 #endif
 
 
@@ -87,20 +97,20 @@ port_coroutine_swap:
 // argument to the C trampoline, which invokes the user entry function
 // and performs a permanent yield. The brk traps if the C trampoline ever
 // returns, which would indicate a bug in the swap logic.
-    .globl  port_coroutine_trampoline_aarch64
+    .globl  SYM(port_coroutine_trampoline_aarch64)
 #if defined(__ELF__)
-    .type   port_coroutine_trampoline_aarch64, %function
+    .type   SYM(port_coroutine_trampoline_aarch64), %function
 #endif
-port_coroutine_trampoline_aarch64:
+SYM(port_coroutine_trampoline_aarch64):
     // Establish a clean frame so any debugger walking via x29 stops cleanly
     // at the trampoline rather than walking into uninitialized stack.
     mov     x29, #0
     mov     x30, #0
     mov     x0, x19
-    bl      port_coroutine_trampoline_c
+    bl      SYM(port_coroutine_trampoline_c)
     brk     #0
 #if defined(__ELF__)
-    .size   port_coroutine_trampoline_aarch64, .-port_coroutine_trampoline_aarch64
+    .size   SYM(port_coroutine_trampoline_aarch64), .-SYM(port_coroutine_trampoline_aarch64)
 #endif
 
 #endif /* __aarch64__ */
