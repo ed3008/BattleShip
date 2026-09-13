@@ -1,5 +1,12 @@
 # iOS Port — Compile Spike (2026-09-12, updated 2026-09-13)
 
+> **Superseded by `docs/ios_port_status_2026-09-13.md`.** The game now
+> runs on device. Everything listed below under "What's blocked" is
+> done; the build-system findings are still accurate and worth reading.
+> Note in particular that this document's conclusion about ucontext on
+> iOS was wrong — it links but fails at runtime, which is what kept the
+> screen black.
+
 ## TL;DR
 
 Every translation unit of the port — the decomp, the `port/` layer, and
