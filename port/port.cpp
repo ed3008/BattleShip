@@ -926,6 +926,15 @@ static int PortInitImpl(int argc, char* argv[]) {
 			port_log("SSB64: attaching Port menu ...\n");
 			gui->SetMenu(std::make_shared<ssb64::PortMenu>());
 			port_log("SSB64: Port menu attached\n");
+
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+			/* On-screen controls. Installed here because it registers a
+			 * GuiWindow, so the Gui has to exist first. Unlike Android —
+			 * where Java views draw the overlay — iOS draws it with ImGui
+			 * and reads SDL_FINGER* events directly. */
+			extern void port_touch_overlay_ios_init(void);
+			port_touch_overlay_ios_init();
+#endif
 		}
 
 #if !defined(__ANDROID__)
@@ -1224,6 +1233,10 @@ void PortShutdown(void) {
 			cd->StopAllRumble();
 		}
 	}
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+	extern void port_touch_overlay_ios_shutdown(void);
+	port_touch_overlay_ios_shutdown();
+#endif
 #if defined(__ANDROID__)
 	// Detach the touch-overlay virtual joystick and reset its statics while
 	// SDL is still up. The process survives Activity relaunches on Android,
