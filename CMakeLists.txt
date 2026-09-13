@@ -999,6 +999,49 @@ else()
     set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "${SSB64_APP_NAME}")
 endif()
 
+# iOS bundle identity and signing.
+#
+# CMake emits an app bundle for an iOS executable on its own, but the
+# generated Info.plist carries no CFBundleIdentifier, and iOS will not
+# install a bundle without one. Signing is left on automatic so Xcode
+# manages the certificate and provisioning profile; a free Personal Team
+# works and issues 7-day profiles.
+#
+# SSB64_IOS_DEVELOPMENT_TEAM is the 10-character Team ID. Leave it empty to
+# build unsigned (compiles and links, cannot be installed). Find yours under
+# Xcode > Settings > Accounts once a team has been selected for a target.
+if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    set(SSB64_IOS_BUNDLE_ID "com.ed3008.battleship" CACHE STRING
+        "CFBundleIdentifier for the iOS app")
+    set(SSB64_IOS_DEVELOPMENT_TEAM "" CACHE STRING
+        "Apple Development Team ID used to sign the iOS app")
+
+    # Both are needed. MACOSX_BUNDLE_GUI_IDENTIFIER is what CMake substitutes
+    # into its Info.plist template for CFBundleIdentifier; the Xcode attribute
+    # is what the build settings and automatic signing read. Setting only the
+    # latter produces a bundle with no CFBundleIdentifier key at all, which
+    # iOS refuses to install.
+    set_target_properties(${PROJECT_NAME} PROPERTIES
+        MACOSX_BUNDLE TRUE
+        MACOSX_BUNDLE_GUI_IDENTIFIER "${SSB64_IOS_BUNDLE_ID}"
+        MACOSX_BUNDLE_BUNDLE_NAME "${SSB64_APP_NAME}"
+        XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${SSB64_IOS_BUNDLE_ID}"
+        XCODE_ATTRIBUTE_CODE_SIGN_STYLE "Automatic"
+        XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"   # iPhone + iPad
+    )
+
+    if (SSB64_IOS_DEVELOPMENT_TEAM)
+        set_target_properties(${PROJECT_NAME} PROPERTIES
+            XCODE_ATTRIBUTE_DEVELOPMENT_TEAM "${SSB64_IOS_DEVELOPMENT_TEAM}")
+        message(STATUS "SSB64 iOS signing: ${SSB64_IOS_BUNDLE_ID} "
+                       "(team ${SSB64_IOS_DEVELOPMENT_TEAM})")
+    else()
+        message(STATUS "SSB64 iOS signing: no team set — the app will build "
+                       "unsigned and cannot be installed. Pass "
+                       "-DSSB64_IOS_DEVELOPMENT_TEAM=<id> to sign it.")
+    endif()
+endif()
+
 if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
     set_target_properties(ssb64_game PROPERTIES
         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
