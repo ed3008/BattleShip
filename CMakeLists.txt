@@ -1095,8 +1095,14 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Android")
 elseif (NOT SSB64_DISCORD_SUPPORTED)
     # iOS: Torch still runs at build time as a host tool (see TorchExternal
     # above), but discord-rpc does not build for the platform.
+    #
+    # SDL2main is not optional here. It supplies the real main(), which
+    # stands up the UIApplication before handing control to the SDL_main that
+    # port/port.cpp's main() is renamed to (see the SDL_main.h include
+    # there). Without it SDL's UIKit video backend refuses to initialise and
+    # the app comes up as a black screen.
     add_dependencies(${PROJECT_NAME} libultraship TorchExternal)
-    target_link_libraries(${PROJECT_NAME} PRIVATE libultraship)
+    target_link_libraries(${PROJECT_NAME} PRIVATE libultraship SDL2main)
 else()
     add_dependencies(${PROJECT_NAME} libultraship TorchExternal discord-rpc)
     target_link_libraries(${PROJECT_NAME} PRIVATE libultraship discord-rpc)

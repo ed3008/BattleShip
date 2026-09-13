@@ -1,8 +1,20 @@
-// On desktop we own `int main` directly. On Android, SDLActivity calls into
-// the .so via dlsym("SDL_main"), so we let SDL_main.h's `#define main SDL_main`
-// rename the entry point during preprocessing — which is exactly what
-// SDL_MAIN_HANDLED would suppress.
-#if !defined(__ANDROID__)
+// On desktop we own `int main` directly. Both mobile targets instead let
+// SDL_main.h's `#define main SDL_main` rename the entry point during
+// preprocessing — which is exactly what SDL_MAIN_HANDLED suppresses.
+//
+// Android: SDLActivity loads the .so and calls in via dlsym("SDL_main").
+// iOS: SDL2main supplies the real main(), which stands up the UIApplication
+// and only then calls ours from inside UIKit's launch cycle. Skipping the
+// rename there leaves our main() owning startup with no UIApplication, and
+// SDL's UIKit video backend refuses to initialise — SDL_Init(SDL_INIT_VIDEO)
+// fails with "Application didn't initialize properly, did you include
+// SDL_main.h in the file containing your main() function?", SDL_CreateWindow
+// returns null, and Gui init trips an ImGui "No current context" assertion.
+// That is the black screen.
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+#if !defined(__ANDROID__) && !(defined(__APPLE__) && TARGET_OS_IPHONE)
 #define SDL_MAIN_HANDLED
 #endif
 #include "port.h"
@@ -10,6 +22,27 @@
 
 #include <libultraship/libultraship.h>
 #include <SDL2/SDL.h>
+
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+/* iOS: SDL must own process startup. SDL2main supplies the real main(),
+ * which stands up the UIApplication and only then calls ours from inside
+ * UIKit's launch cycle. SDL_main.h is what renames our main() to SDL_main
+ * so that hand-off can happen.
+ *
+ * Without it our main() runs first, there is no UIApplication, and SDL's
+ * UIKit video backend refuses to start: SDL_Init(SDL_INIT_VIDEO) fails with
+ * "Application didn't initialize properly, did you include SDL_main.h in the
+ * file containing your main() function?". Everything downstream then falls
+ * over — SDL_CreateWindow returns null, SDL_CreateRenderer reports an
+ * invalid window, and Gui init trips an ImGui "No current context"
+ * assertion, which is the black screen.
+ *
+ * Guarded to iOS on purpose: on desktop this same rename would demand
+ * SDL2main on every platform and change how the app starts everywhere.
+ * Android does not need it either — SDLActivity loads libmain.so and calls
+ * SDL_main through dlsym. */
+#include <SDL2/SDL_main.h>
+#endif
 #include <libultraship/controller/controldeck/ControlDeck.h>
 #include <fast/Fast3dWindow.h>
 #include <ship/resource/File.h>
