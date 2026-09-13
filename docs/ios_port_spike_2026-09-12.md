@@ -1,16 +1,20 @@
-# iOS Port — Compile Spike (2026-09-12)
+# iOS Port — Compile Spike (2026-09-12, updated 2026-09-13)
 
 ## TL;DR
 
-`libultraship.a` (388 MB fat, x86_64 + arm64, 310 objects) builds clean for
-the **iOS Simulator** SDK against Xcode 26.6 / iOS SDK 26.5, including the
-Fast3D **Metal** backend (`gfx_metal.o`, `gfx_metal_shader.o`). The top-level
-CMake graph configures and generates an Xcode project for `CMAKE_SYSTEM_NAME=iOS`.
+Every translation unit of the port — the decomp, the `port/` layer, and
+libultraship including the Fast3D **Metal** backend — compiles for
+`arm64-apple-ios` against Xcode 26.6 / iOS SDK 26.5. Torch runs as a host
+tool during the build and extracts the user's ROM into a 12 MB
+`BattleShip.o2r`, so the asset pipeline works end to end.
 
-**The engine library compiles; the `ssb64` app target does not build yet and
-there is no running game.** The Torch asset pipeline and the whole
-app-bundle/resource story are unwritten. Device (`iphoneos`) builds have not
-been attempted at all — only `iphonesimulator`.
+**The app does not link yet.** Four symbols remain unresolved, all
+platform-specific leftovers in libultraship (see "What's blocked"). There is
+no running game, and nothing has been installed on a device.
+
+Targeting **device** (`-sdk iphoneos`), not the simulator: the simulator has
+no ARKit and no camera, so it can never host the actual goal. It was only
+ever a way to dodge code signing.
 
 ## What works
 
@@ -120,47 +124,123 @@ handles, and a Raphnet USB adapter cannot be attached to an iPhone anyway.
 The Android no-op stub in `common.cmake` was already the right shape, so iOS
 now shares it rather than getting a second one.
 
+### Torch as a host tool (the environment trap)
+
+`ExternalProject_Add(TorchExternal)` builds Torch to run on *this Mac* during
+the build. Under an iOS parent it produced an iOS binary instead, and the
+extraction step died with `Killed: 9`.
+
+Two wrong diagnoses came first, both worth recording. Setting
+`-DCMAKE_SYSTEM_NAME=Darwin` to force a host build put CMake into
+cross-compiling mode; with a blanked deployment target the link lost its
+platform-version load command, `ld` skipped the automatic ad-hoc signature,
+and macOS SIGKILLs unsigned arm64 binaries. Removing that fixed signing in an
+isolated test but not in the real build — and a stale-objects theory did not
+survive a clean rebuild either.
+
+The actual cause: ExternalProject's steps run inside an Xcode script phase,
+and xcodebuild exports the target platform into that environment (`SDKROOT`,
+`IPHONEOS_DEPLOYMENT_TARGET`, `PLATFORM_NAME`, ...). clang honours those over
+anything CMake passes, so every object compiled for iOS despite
+`CMAKE_OSX_SYSROOT` pointing at the macOS SDK. A relink in a clean shell said
+it plainly: *"building for 'macOS', but linking in object file built for
+'iOS'"*.
+
+The fix scrubs those variables for the sub-build's configure and build steps
+via `cmake -E env --unset=...`. Verified on three axes: `vtool -show-build`
+reports `platform MACOS`, `codesign` reports `adhoc,linker-signed`, and the
+binary runs.
+
+### Discord Rich Presence and the self-updater are off on iOS
+
+Both were measured, not assumed — the first full compile pass proved that
+most `#if !defined(__ANDROID__)` sites are harmless on iOS, so only what
+actually breaks is excluded.
+
+- discord-rpc does not build: `src/discord_register_osx.m` imports
+  `<AppKit/AppKit.h>`, which the iOS SDK does not ship.
+- `Updater.cpp` shells out through `system()`, marked `__API_UNAVAILABLE` on
+  iOS.
+
+Rather than repeat a two-platform test at each of the four CMake sites and
+two C++ guards, the conditions are named once —`SSB64_NO_DISCORD` and
+`SSB64_NO_SELF_UPDATER`, defined for Android *and* iOS. Android's behaviour
+is unchanged; the guards that used to test `__ANDROID__` now test the macro
+that is defined for Android anyway.
+
+### Two more `system()` call sites
+
+- `port/bridge/lbreloc_byteswap.cpp` created its texture-dump directory by
+  spawning `mkdir`. Replaced with `std::filesystem::create_directories`,
+  which also removes the separate Windows branch.
+- `port/first_run.cpp` spawns Torch through a shell for on-device
+  extraction. iOS gets an explicit branch that fails with a clear message:
+  the archive is extracted on the host at build time, so the path should be
+  unreachable, and reporting a silent success would be worse.
+
+### PLATFORM is overridable (libultraship)
+
+`cmake/ios-toolchain-populate.cmake` hard-coded `PLATFORM=OS64COMBINED`.
+COMBINED is Xcode-only — the leetal toolchain hard-fails under any other
+generator — and it also drags in an x86_64 simulator slice that nothing here
+needs. It now defaults to the same value but respects a caller-provided one.
+
 ## What's blocked
 
-### 1. Torch cannot cross-compile (blocks all asset targets)
+### 1. Four unresolved symbols (the only thing between here and a binary)
 
-`TorchExternal` / `ExtractAssets` / `GenerateBattleShipO2R` would build Torch
-*for iOS* and then try to execute it on the host during the build. Identical
-to the problem the Android spike hit — see
-`docs/android_port_spike_2026-05-01.md`, which gated
-`ExternalProject_Add(TorchExternal)` off for the same reason.
+```
+Ship::CoreAudioAudioPlayer::CoreAudioAudioPlayer(Ship::AudioSettings)
+Ship::CoreAudioAudioPlayer::~CoreAudioAudioPlayer()
+_isNativeMacOSFullscreenActive
+_toggleNativeMacOSFullscreen
+```
 
-For the first bring-up the cheapest route is to **not run Torch in the iOS
-build at all** and stage the `BattleShip.o2r` already produced by the macOS
-build into the app bundle. That defers the entire on-device extraction story
-(which on Android needs `libtorch_runner.so` + a SAF picker; on iOS it would
-need Torch linked statically + `UIDocumentPickerViewController`). Only worth
-building once the game actually runs.
+Both live in the libultraship submodule and need opposite treatments.
 
-### 2. App target / bundle unwritten
+**CoreAudio** — `src/ship/audio/CoreAudioAudioPlayer.cpp` exists and the
+frameworks are already linked for iOS (`src/CMakeLists.txt:91` covers
+`Darwin OR iOS`); the *source file* just is not in the iOS build. iOS has
+CoreAudio and AudioToolbox, so compiling it should be enough.
 
-`CMakeLists.txt` has 15 `CMAKE_SYSTEM_NAME STREQUAL "Android"` gates. Two are
-now handled. The ones the `ssb64` target will hit:
+**macOS fullscreen** — `src/ship/utils/macUtils.mm` is Cocoa, genuinely
+inapplicable to iOS, and is called unguarded from `src/fast/backends/
+gfx_sdl2.cpp:239,240,697`. iOS has no windowed-fullscreen concept (an app is
+always fullscreen), so those call sites need guarding rather than a port.
 
-- `:818` / `:908` — Discord RPC is fetched and its include dir added on any
-  non-Android target. Network/desktop only; exclude on iOS.
-- `:855` — Android emits a SHARED `libmain.so` for `SDLActivity`; desktop
-  emits an executable. iOS needs an executable inside an app bundle
-  (`MACOSX_BUNDLE`) with an `Info.plist`, bundle identifier and, for a
-  device build, a development team + signing identity.
-- `:1038` — runtime data (`gamecontrollerdb.txt`, `config.yml`, CSS PNGs)
-  is copied next to the binary on desktop. On iOS these must be bundle
-  resources.
-- `:534` / `:129` — window-icon generation and `USE_OPENGLES` are desktop /
-  Android concerns; iOS wants neither (Metal only).
+### 2. App bundle and signing
 
-### 3. Device build unattempted
+Nothing has been installed anywhere. The target still produces a bare
+executable: no `MACOSX_BUNDLE`, no `Info.plist`, no bundle identifier, and
+no development team. Runtime data (`BattleShip.o2r`, `gamecontrollerdb.txt`,
+`config.yml`, the CSS PNGs) is staged next to the binary as on desktop and
+has to become bundle resources instead. Installing on a device additionally
+needs a provisioning profile.
 
-Everything above is `-sdk iphonesimulator` with `CODE_SIGNING_ALLOWED=NO`.
-Simulator-arm64 and device-arm64 are different platform triples: a clean
-simulator build is *not* evidence that the device build links. Device
-requires a provisioning profile and an Apple Developer team, and is where
-ARKit can first be exercised — the simulator has no ARKit and no camera.
+### 3. Nothing has been run
+
+Compiling and linking say nothing about behaviour. The coroutine backend in
+particular rides on deprecated ucontext routines that are present and link
+cleanly but have never executed here.
+
+### Notes on the build system
+
+- **Dependency cycle (resolved, no code change).** Xcode reported
+  `GenerateF3DO2R → ssb64_game → GenerateRelocArtifacts → TorchExternal →
+  GenerateF3DO2R`. None of those edges is a real `add_dependencies`; Xcode
+  was enforcing a linear target order because *"Parallelize build for
+  command-line builds"* is off, and the artificial edges closed a loop with
+  genuine file-level dependencies. Building with `-parallelizeTargets`
+  avoids it. Worth knowing before anyone tries to "fix" the CMake graph.
+- **Ninja is not a usable alternative.** It dies far earlier: SDL2's `.m`
+  sources are classified as Objective-C++ and receive `-std=gnu++2a`, which
+  is invalid in Objective-C mode.
+- **The toolchain is included mid-configure** (`libultraship/CMakeLists.txt:63`)
+  rather than passed as `CMAKE_TOOLCHAIN_FILE`. A consequence:
+  `-DPLATFORM=SIMULATORARM64` sets the architecture list but leaves
+  `CMAKE_OSX_SYSROOT` on the device SDK, so a simulator build links device
+  `.tbd` stubs and fails. Device builds are self-consistent; simulator
+  builds would need the sysroot passed explicitly.
 
 ## Reproduction
 
@@ -172,12 +252,15 @@ CMake + Ninja from Homebrew.
 cmake -S . -B build-us -GNinja -DSSB64_VERSION=us
 cmake --build build-us -j
 
-# iOS: configure + generate Xcode project
+# iOS: configure + generate the Xcode project
 cmake -S . -B build-ios -G Xcode -DCMAKE_SYSTEM_NAME=iOS -DSSB64_VERSION=us
 
-# iOS: engine library only (the app target does not build yet)
-xcodebuild -project build-ios/ssb64.xcodeproj -target libultraship \
-  -configuration Debug -sdk iphonesimulator CODE_SIGNING_ALLOWED=NO
+# iOS device: compiles fully, still four symbols short of linking.
+# -parallelizeTargets is required — without it Xcode reports a dependency
+# cycle. Signing is off because nothing is installed yet.
+xcodebuild -project build-ios/ssb64.xcodeproj -target ssb64 \
+  -configuration Debug -sdk iphoneos -parallelizeTargets \
+  CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
 ```
 
 macOS host dependencies came from Homebrew: `cmake ninja sdl2 glew libzip
