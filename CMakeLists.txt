@@ -34,6 +34,30 @@ if (DISABLE_SCRIPTING)
     add_compile_definitions(DISABLE_SCRIPTING)
 endif()
 
+# Discord Rich Presence. Unavailable on both mobile targets, for different
+# reasons: on Android it was dropped along with the rest of the curl-driven
+# network features, and on iOS discord-rpc simply does not build — its
+# src/discord_register_osx.m imports <AppKit/AppKit.h>, which the iOS SDK
+# does not ship (iOS is UIKit). Several sites below need the same answer,
+# so name the condition once; SSB64_NO_DISCORD is what the C++ guards test.
+if (CMAKE_SYSTEM_NAME STREQUAL "Android" OR CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    set(SSB64_DISCORD_SUPPORTED FALSE)
+    add_compile_definitions(SSB64_NO_DISCORD)
+else()
+    set(SSB64_DISCORD_SUPPORTED TRUE)
+endif()
+
+# Built-in self-updater. Also mobile-hostile on both targets: Android gets
+# app updates from the Play Store, and an iOS build cannot replace itself
+# either. It is a hard build error there too — Updater.cpp shells out
+# through system(), which iOS marks __API_UNAVAILABLE.
+if (CMAKE_SYSTEM_NAME STREQUAL "Android" OR CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    set(SSB64_SELF_UPDATER_SUPPORTED FALSE)
+    add_compile_definitions(SSB64_NO_SELF_UPDATER)
+else()
+    set(SSB64_SELF_UPDATER_SUPPORTED TRUE)
+endif()
+
 include(ExternalProject)
 include(FetchContent) # pull discord-rpc from GitHub (desktop only)
 
@@ -230,22 +254,99 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Android")
 else()
     # Desktop: build Torch as a host executable via ExternalProject so it
     # can run at our build time to extract ROM assets.
-    ExternalProject_Add(TorchExternal
-        PREFIX TorchExternal
-        SOURCE_DIR ${CMAKE_SOURCE_DIR}/torch
-        CMAKE_ARGS
-            -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/torch-install
-            -DUSE_STANDALONE=ON
-            -DBUILD_STORMLIB=OFF
-            -DBUILD_SM64=OFF
-            -DBUILD_MK64=OFF
-            -DBUILD_SF64=OFF
-            -DBUILD_PM64=OFF
-            -DBUILD_FZERO=OFF
-            -DBUILD_MARIO_ARTIST=OFF
-            -DBUILD_NAUDIO=ON
-            -DBUILD_SSB64=ON
+    #
+    # When the parent build targets iOS, Torch still has to be a *host*
+    # binary — it runs on this Mac during our build, it is never shipped.
+    # ExternalProject inherits the parent's generator and cache, so without
+    # an override it picks up the iOS sysroot and emits an iPhoneOS binary
+    # that cannot execute here. The Android spike hit the same wall and had
+    # to gate TorchExternal off entirely; on iOS we can do better, because
+    # the host is already macOS.
+    #
+    # Two overrides are needed:
+    #   - platform: point the sub-build back at the macOS SDK and the host
+    #     architecture, and clear the inherited iOS deployment target.
+    #   - generator: the iOS parent uses Xcode, which is multi-config and
+    #     would place the binary under <CONFIG>/. TORCH_EXECUTABLE below
+    #     assumes a single-config layout on non-Windows, so pin Ninja.
+    set(_torch_host_args "")
+    set(_torch_host_generator "")
+    if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
+        execute_process(
+            COMMAND xcrun --sdk macosx --show-sdk-path
+            OUTPUT_VARIABLE _torch_host_sysroot
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+        )
+        # Override the sysroot and architecture only. Do NOT set
+        # CMAKE_SYSTEM_NAME: naming it explicitly puts the sub-build into
+        # CMake's cross-compiling mode, and together with a blank deployment
+        # target the link ends up with no platform-version load command. ld
+        # then skips the automatic ad-hoc signature, and macOS SIGKILLs the
+        # unsigned arm64 binary the moment the extraction step runs it
+        # ("Killed: 9"). Left alone, the sub-build detects the host normally
+        # and the linker signs it (adhoc,linker-signed), which is what the
+        # desktop build produces.
+        set(_torch_host_args
+            -DCMAKE_OSX_SYSROOT=${_torch_host_sysroot}
+            -DCMAKE_OSX_ARCHITECTURES=${CMAKE_HOST_SYSTEM_PROCESSOR}
+        )
+        set(_torch_host_generator CMAKE_GENERATOR "Ninja")
+    endif()
+
+    # Shared argument list; both branches below configure Torch the same way.
+    set(_torch_cmake_args
+        -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/torch-install
+        -DUSE_STANDALONE=ON
+        -DBUILD_STORMLIB=OFF
+        -DBUILD_SM64=OFF
+        -DBUILD_MK64=OFF
+        -DBUILD_SF64=OFF
+        -DBUILD_PM64=OFF
+        -DBUILD_FZERO=OFF
+        -DBUILD_MARIO_ARTIST=OFF
+        -DBUILD_NAUDIO=ON
+        -DBUILD_SSB64=ON
     )
+
+    if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
+        # ExternalProject's steps run inside an Xcode script phase, and
+        # xcodebuild exports the target platform into that environment
+        # (SDKROOT, IPHONEOS_DEPLOYMENT_TARGET, PLATFORM_NAME, ...). clang
+        # honours those over anything CMake passes, so the sub-build compiled
+        # every object for iOS even with CMAKE_OSX_SYSROOT pointed at the
+        # macOS SDK. The result was an iOS torch binary that macOS refuses to
+        # execute — the extraction step died with "Killed: 9", and a later
+        # relink surfaced the truth: "building for 'macOS', but linking in
+        # object file built for 'iOS'".
+        #
+        # Scrub those variables for the configure and build steps so the
+        # sub-build sees a plain host environment. Install is skipped:
+        # TORCH_EXECUTABLE below reads straight out of the build directory.
+        set(_torch_clean_env ${CMAKE_COMMAND} -E env
+            --unset=SDKROOT
+            --unset=IPHONEOS_DEPLOYMENT_TARGET
+            --unset=MACOSX_DEPLOYMENT_TARGET
+            --unset=PLATFORM_NAME
+            --unset=EFFECTIVE_PLATFORM_NAME
+            --unset=TARGET_DEVICE_PLATFORM_NAME
+            --unset=TOOLCHAINS
+        )
+        ExternalProject_Add(TorchExternal
+            PREFIX TorchExternal
+            SOURCE_DIR ${CMAKE_SOURCE_DIR}/torch
+            CONFIGURE_COMMAND ${_torch_clean_env} ${CMAKE_COMMAND}
+                -G Ninja -S <SOURCE_DIR> -B <BINARY_DIR>
+                ${_torch_host_args} ${_torch_cmake_args}
+            BUILD_COMMAND ${_torch_clean_env} ${CMAKE_COMMAND} --build <BINARY_DIR>
+            INSTALL_COMMAND ""
+        )
+    else()
+        ExternalProject_Add(TorchExternal
+            PREFIX TorchExternal
+            SOURCE_DIR ${CMAKE_SOURCE_DIR}/torch
+            CMAKE_ARGS ${_torch_cmake_args}
+        )
+    endif()
 
     ExternalProject_Get_Property(TorchExternal install_dir)
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
@@ -537,6 +638,19 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Android")
         "port/enhancements/(Updater|DiscordRichPresence|ShaderDownloader)\\.cpp$")
     list(FILTER SSB64_SRC_PORT EXCLUDE REGEX "port/port_window_icon\\.cpp$")
 endif()
+if (NOT SSB64_SELF_UPDATER_SUPPORTED)
+    # Same treatment for the updater: Android's wider filter above already
+    # covered it, iOS needs it dropped on its own.
+    list(FILTER SSB64_SRC_PORT EXCLUDE REGEX "port/enhancements/Updater\\.cpp$")
+endif()
+if (NOT SSB64_DISCORD_SUPPORTED)
+    # Drop the DRP implementation wherever discord-rpc is not linked. On
+    # Android the filter above already covered it as part of a wider set;
+    # iOS keeps Updater and ShaderDownloader (both compile there) and needs
+    # only this one gone. The call sites are guarded with SSB64_NO_DISCORD.
+    list(FILTER SSB64_SRC_PORT EXCLUDE REGEX
+        "port/enhancements/DiscordRichPresence\\.cpp$")
+endif()
 # Treat the generated icon header as a source so CMake schedules it ahead
 # of any port TU compilation (port_window_icon.cpp #includes it).
 if (NOT CMAKE_SYSTEM_NAME STREQUAL "Android")
@@ -823,7 +937,7 @@ endif()
 # Fetch Discord RPC (desktop only — Android drops Discord Rich Presence
 # along with the rest of the network-dependent features).
 ################################################################################
-if (NOT CMAKE_SYSTEM_NAME STREQUAL "Android")
+if (SSB64_DISCORD_SUPPORTED)
     # discord-rpc v3.4.0's CMakeLists declares cmake_minimum_required(VERSION 2.x),
     # which CMake 3.30+ refuses to honor. Force a baseline policy version for the
     # fetched subdir so the build still configures with current CMake.
@@ -913,7 +1027,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/debug_tools
     ${SSB64_CSS_GEN_DIR}                         # CSS icon baked headers (arrow_data.h)
 )
-if (NOT CMAKE_SYSTEM_NAME STREQUAL "Android")
+if (SSB64_DISCORD_SUPPORTED)
     target_include_directories(${PROJECT_NAME} PRIVATE
         ${SSB64_ICON_GEN_DIR}                         # Generated icon header (port_icon_data.h)
         ${discord_rpc_SOURCE_DIR}/include             # Discord Rich Presence
@@ -931,7 +1045,14 @@ endif()
 ################################################################################
 
 if (CMAKE_SYSTEM_NAME STREQUAL "Android")
+    # Android has neither: Torch is wrapped as libtorch_runner.so for
+    # on-device extraction, and discord-rpc is dropped entirely.
     add_dependencies(${PROJECT_NAME} libultraship)
+    target_link_libraries(${PROJECT_NAME} PRIVATE libultraship)
+elseif (NOT SSB64_DISCORD_SUPPORTED)
+    # iOS: Torch still runs at build time as a host tool (see TorchExternal
+    # above), but discord-rpc does not build for the platform.
+    add_dependencies(${PROJECT_NAME} libultraship TorchExternal)
     target_link_libraries(${PROJECT_NAME} PRIVATE libultraship)
 else()
     add_dependencies(${PROJECT_NAME} libultraship TorchExternal discord-rpc)

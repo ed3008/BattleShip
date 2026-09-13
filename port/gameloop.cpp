@@ -732,7 +732,7 @@ void PortPushFrame(void)
 	port_enhancement_stage_hazards_tick();
 	port_widescreen_tick();
 
-#if !defined(__ANDROID__)
+#if !defined(SSB64_NO_DISCORD)
 	ssb64::enhancements::TickDiscordPresence(); // DRP
 #endif
 

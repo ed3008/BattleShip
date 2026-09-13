@@ -858,9 +858,10 @@ void PortMenu::AddMenuSettings() {
         .RaceDisable(false)
         .Options(CheckboxOptions().Tooltip("Gives the search input focus when it becomes visible."));
 
-#if !defined(__ANDROID__)
-    // DRP — Android drops discord-rpc entirely (no curl + Play Store
-    // distribution friction; the Discord SDK isn't built for mobile).
+#if !defined(SSB64_NO_DISCORD)
+    // DRP — dropped on both mobile targets. Android: no curl + Play Store
+    // distribution friction, and the Discord SDK isn't built for mobile.
+    // iOS: discord-rpc does not compile there at all (AppKit).
     AddWidget(path, "Enable Discord Rich Presence", WIDGET_CVAR_CHECKBOX)
         .CVar(CVAR_SETTING("Menu.EnableDRP"))
         .RaceDisable(false)
@@ -1693,9 +1694,10 @@ void PortMenu::AddMenuAbout() {
     AddWidget(path, "Zorkats: C Modding Documentation", WIDGET_TEXT);
 
 
-#if !defined(__ANDROID__)
-    // BUILT-IN UPDATER — hidden on Android. App updates come through the
-    // Play Store on mobile; a curl-driven GitHub-releases updater can't
+#if !defined(SSB64_NO_SELF_UPDATER)
+    // BUILT-IN UPDATER — hidden on both mobile targets. App updates come
+    // through the Play Store on Android, and an iOS build cannot replace
+    // itself either; a curl-driven GitHub-releases updater can't
     // replace a system-managed installation, and the curl shell-out
     // (Updater.cpp) isn't built on Android in the first place.
     // The background check still fires when the menu loads
@@ -1762,7 +1764,7 @@ void PortMenu::AddMenuAbout() {
         // Pass true to bypass the single-session lock
         ssb64::enhancements::CheckForUpdatesAsync(true);
     });
-#endif // !__ANDROID__ (Updater)
+#endif // !SSB64_NO_SELF_UPDATER
 }
 
 void PortMenu::AddMenuElements() {
