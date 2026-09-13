@@ -1203,14 +1203,31 @@ if (NOT CMAKE_SYSTEM_NAME STREQUAL "Android")
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             ${CMAKE_SOURCE_DIR}/yamls/${SSB64_VERSION}
             $<TARGET_FILE_DIR:${PROJECT_NAME}>/yamls/${SSB64_VERSION}
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            ${TORCH_EXECUTABLE}
-            $<TARGET_FILE_DIR:${PROJECT_NAME}>/${TORCH_SIDECAR_NAME}
+        # The torch sidecar is staged separately just below — it is a host
+        # tool, and on iOS it must not end up inside the app bundle.
         # CSS stage asset PNGs (final_destination_background.png, etc.) are
         # copied in a separate POST_BUILD step added by the DeriveStageAssets
         # block further below, after SSB64_BASEROM is resolved.
         # Arrow data is baked into the binary via arrow_data.h / arrow_left_data.h.
     )
+
+    # Torch sidecar next to the binary. Desktop only.
+    #
+    # On desktop this is how a packaged build re-extracts assets at first
+    # run: the app spawns the sidecar. iOS can do neither half of that — it
+    # cannot spawn a subprocess, and the binary is a macOS executable
+    # (platform MACOS) that would be 10 MB of dead weight inside an iOS app
+    # bundle and would fail bundle validation outright. The iOS build
+    # extracts BattleShip.o2r on the host at build time instead, so the tool
+    # is only ever needed on this side of the fence.
+    if (NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+        add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${TORCH_EXECUTABLE}
+                $<TARGET_FILE_DIR:${PROJECT_NAME}>/${TORCH_SIDECAR_NAME}
+            COMMENT "Staging the torch sidecar next to the binary"
+        )
+    endif()
 else()
     # Android: produce f3d.o2r in the source tree so Gradle's stageGameAssets
     # task can pick it up at APK build time. No POST_BUILD copies — the APK
