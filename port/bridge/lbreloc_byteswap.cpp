@@ -24,6 +24,8 @@
 #include <spdlog/spdlog.h>
 
 #include <cstdarg>
+#include <filesystem>
+#include <system_error>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -385,11 +387,12 @@ static void tex_dump_init_once()
 	}
 	// Best-effort directory create.  On Windows the binary's CWD is
 	// build/Debug, so this lands at build/Debug/tex_dump/.
-#if defined(_WIN32)
-	std::system("if not exist tex_dump mkdir tex_dump");
-#else
-	std::system("mkdir -p tex_dump");
-#endif
+	//
+	// std::filesystem rather than a shell command: iOS marks system() as
+	// __API_UNAVAILABLE, so the old spawn broke the build there, and this
+	// drops the per-platform branch as a bonus.
+	std::error_code ec;
+	std::filesystem::create_directories("tex_dump", ec);
 	sTexDumpState = 1;
 }
 
