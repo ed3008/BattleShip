@@ -1,3 +1,7 @@
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+
 #include "first_run.h"
 #include "app_paths.h"
 #include "native_dialog.h"
@@ -282,6 +286,18 @@ bool RunTorchCommand(const std::string& commandLine, const std::string& workingD
         return false;
     }
     return true;
+#elif defined(__APPLE__) && TARGET_OS_IPHONE
+    /* iOS has no shell to spawn into: system() is __API_UNAVAILABLE, and a
+     * sandboxed app cannot execute a torch sidecar even if one were bundled.
+     * The iOS build instead runs Torch on the host at build time and stages
+     * BattleShip.o2r into the app bundle, so this should be unreachable.
+     * Fail loudly rather than reporting a silent success. */
+    (void)workingDir;
+    (void)commandLine;
+    (void)logPath;
+    error = "on-device asset extraction is unavailable on iOS "
+            "(BattleShip.o2r is extracted at build time and bundled)";
+    return false;
 #else
     const std::string shellCommand =
         "cd " + QuoteCommandArg(workingDir) + " && " + commandLine + " > " + QuoteCommandArg(logPath) + " 2>&1";
