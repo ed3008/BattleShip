@@ -26,7 +26,11 @@ End-to-end on device:
    `BattleShip.o2r` from inside the bundle.
 5. Audio assets parse and play — 43 music instruments, 47 sequences.
 6. `gamecontrollerdb.txt` loads (42 mappings).
-7. The game renders and is playable.
+7. The game renders and is playable, at a measured 59.91fps sustained over
+   166 seconds with no dropped interval.
+8. On-screen controls work (drag-anywhere stick, A/B/Z/R/Start), and a
+   paired Bluetooth controller works with no extra code — SDL talks to
+   GameController natively.
 
 ## The six platform bugs, in the order they had to be solved
 
@@ -142,20 +146,39 @@ inside the function that was not being called, so its silence was
 ambiguous. Every wrong turn in this list came from treating a plausible
 explanation as a confirmed one.
 
+## Native resolution was tried and reverted
+
+`SDL_WINDOW_ALLOW_HIGHDPI` is deliberately **not** set for iOS. Adding it
+broke rendering on device: first launch came up with audio and a black
+screen, the next with neither. Reverted; do not re-apply it without the
+verification below.
+
+The drawable is 926x428 points on a 2778x1284 display, so iOS upscales by
+3x linear. The symptom pattern — the layer resizes but nothing presents —
+points at the screen framebuffer or viewport keeping the old dimensions
+while the layer changes underneath them.
+
+If someone picks this up: set the flag, then *read the probes before
+installing*. `Metal init` must report 2778x1284 and
+`SetupScreenFramebuffer` must be pinned to the same number. If those two
+disagree, that gap is the bug. The probes for exactly this already exist
+and were not consulted the first time round.
+
+It is a sharpness win, not a playability one. At 926x428 the game looks
+good and holds 60fps.
+
 ## What's left
 
-- **Shader compilation hitches.** Metal compiles MSL on demand during play;
-  each one is a visible stall. Precompiling at startup would smooth it.
-- **Native resolution.** The window is created without
-  `SDL_WINDOW_ALLOW_HIGHDPI` on iOS (`gfx_sdl2.cpp`), so rendering happens
-  at 926x428 points and iOS scales up to 2778x1284. Fixing it triples pixel
-  cost — worth doing only after frame times are measured.
-- **Controllers.** `gamecontrollerdb.txt` loads but no physical controller
-  has been tested.
-- **On-device ROM import.** The archive is bundled at build time. A
-  shippable build would need Torch linked statically plus
-  `UIDocumentPickerViewController`, the way Android uses
+- **On-device ROM import.** The archive is bundled at build time, which is
+  simpler and boots faster. Only needed to hand the app to someone who
+  supplies their own ROM — and there is no realistic distribution route for
+  this project anyway. A shippable build would need Torch linked statically
+  plus `UIDocumentPickerViewController`, the way Android uses
   `libtorch_runner.so` and a SAF picker.
+- **Shader compilation hitches** were visible in a Debug build and are gone
+  in Release. Metal compiles MSL on demand, so the cost is a one-time
+  warmup per shader; steady state measured clean. Precompiling at startup
+  would smooth the first seconds if it ever matters.
 - **`UIScene` lifecycle.** UIKit warns it will become mandatory.
 - The probes added during this work are one-shot and cheap, but they are
   diagnostics and could be dropped or demoted once the port settles.
