@@ -5,10 +5,11 @@ project(ssb64 LANGUAGES C CXX)
 # Android needs ASM for the aarch64 coroutine context-switch
 # (port/coroutine_aarch64.S). Enable it before any add_library/add_executable
 # call sees an .S source. ASM is preprocessed by clang on the way through.
-# iOS does not need this: unlike bionic, the iOS SDK does ship working
-# getcontext/makecontext/swapcontext, so it uses coroutine_posix.cpp like
-# every other POSIX target.
-if (CMAKE_SYSTEM_NAME STREQUAL "Android")
+# iOS needs it for the same reason, arrived at the hard way: <ucontext.h>
+# exists in the iOS SDK and libSystem exports getcontext/makecontext/
+# swapcontext, so it all compiles and links — but getcontext() fails at
+# runtime. The game then started with zero coroutines and rendered nothing.
+if (CMAKE_SYSTEM_NAME STREQUAL "Android" OR CMAKE_SYSTEM_NAME STREQUAL "iOS")
     enable_language(ASM)
 endif()
 
@@ -990,7 +991,15 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Android")
     )
     set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "main")
 else()
-    add_executable(${PROJECT_NAME} ${SSB64_SRC_PORT} ${SSB64_DEBUG_TOOLS} $<TARGET_OBJECTS:ssb64_game>)
+    # The coroutine asm shim is not picked up by the port/*.cpp glob (.S is
+    # not in it), so iOS has to list it explicitly. Its body is #if-guarded
+    # on __aarch64__, so it is inert anywhere else.
+    set(SSB64_EXTRA_SRC "")
+    if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
+        set(SSB64_EXTRA_SRC port/coroutine_aarch64.S)
+    endif()
+    add_executable(${PROJECT_NAME} ${SSB64_SRC_PORT} ${SSB64_DEBUG_TOOLS} ${SSB64_EXTRA_SRC}
+                   $<TARGET_OBJECTS:ssb64_game>)
 
     # User-facing binary name. The CMake target keeps the historical
     # `ssb64` identifier (matches the repo, build dirs, internal symbols),

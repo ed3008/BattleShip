@@ -457,6 +457,11 @@ extern "C" void port_submit_display_list(void *dl)
 	/* Replace any earlier deferred DL from this frame — only the last one
 	 * matters since they all target the same framebuffer slot. In practice
 	 * SSB64 submits one DL per VI tick. */
+	static int sLoggedSubmit = 0;
+	if (!sLoggedSubmit) {
+		sLoggedSubmit = 1;
+		port_log("SSB64: [gfx-probe] port_submit_display_list staged dl=%p\n", dl);
+	}
 	sPendingDisplayList = static_cast<Gfx *>(dl);
 }
 
@@ -467,7 +472,19 @@ extern "C" void port_submit_display_list(void *dl)
  * thread the JVM tracks. */
 extern "C" void port_drain_pending_display_list(void)
 {
+	static int sLoggedDrain = 0;
+	if (!sLoggedDrain) {
+		sLoggedDrain = 1;
+		port_log("SSB64: [gfx-probe] first drain, pending=%p\n",
+		         (void *)sPendingDisplayList);
+	}
 	if (sPendingDisplayList == nullptr) {
+		static int sLoggedDrainEmpty = 0;
+		if (!sLoggedDrainEmpty) {
+			sLoggedDrainEmpty = 1;
+			port_log("SSB64: [gfx-probe] drain found nothing staged — "
+			         "no display list reached the renderer\n");
+		}
 		return;
 	}
 

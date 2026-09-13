@@ -14,7 +14,16 @@
  * time.
  */
 
-#if defined(__ANDROID__)
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+
+/* Also used by iOS: the POSIX ucontext backend compiles and links there but
+ * getcontext() fails at runtime, so this hand-written swap is the only
+ * working option on both mobile targets. Nothing in this file is
+ * Android-specific — it is mmap/mprotect/munmap/sysconf and the .S shim,
+ * which emits Mach-O symbol names via its SYM() macro. */
+#if defined(__ANDROID__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
 
 #if !defined(__aarch64__) && !defined(__arm__)
 #  error "Android coroutine backend supports arm64-v8a (coroutine_aarch64.S) "  \

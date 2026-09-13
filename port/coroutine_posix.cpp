@@ -5,7 +5,16 @@
  * swapcontext() provides the resume/yield mechanism.
  */
 
-#if !defined(_WIN32) && !defined(__ANDROID__)
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+
+/* iOS is excluded even though <ucontext.h> exists there and the symbols link:
+ * getcontext() fails at runtime, so port_coroutine_create returned NULL and
+ * the game came up with zero threads ("FATAL — failed to create game
+ * coroutine", then "0 threads registered" every frame and a black screen).
+ * iOS uses the hand-written aarch64 swap instead, like Android. */
+#if !defined(_WIN32) && !defined(__ANDROID__) && !(defined(__APPLE__) && TARGET_OS_IPHONE)
 
 /*
  * macOS marks the ucontext / swapcontext routines as deprecated and hides
