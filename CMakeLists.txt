@@ -1021,8 +1021,19 @@ if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
     # is what the build settings and automatic signing read. Setting only the
     # latter produces a bundle with no CFBundleIdentifier key at all, which
     # iOS refuses to install.
+    # CMake's stock bundle Info.plist template is minimal and, critically,
+    # declares no launch screen. iOS reads the absence of one as "this app
+    # predates modern screen sizes" and runs it in legacy compatibility mode:
+    # the window comes back as the original iPhone's 320x480 points — 480x320
+    # in landscape — scaled up, regardless of what SDL_CreateWindow asked for.
+    # Observed on an iPhone 13 Pro Max (2778x1284) as a 480x320 CAMetalLayer.
+    # cmake/iOSInfo.plist.in adds UILaunchScreen along with the orientation,
+    # fullscreen and input keys the stock template also lacks.
     set_target_properties(${PROJECT_NAME} PROPERTIES
         MACOSX_BUNDLE TRUE
+        MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/cmake/iOSInfo.plist.in"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "${BATTLESHIP_VERSION}"
+        MACOSX_BUNDLE_BUNDLE_VERSION "${BATTLESHIP_VERSION}"
         MACOSX_BUNDLE_GUI_IDENTIFIER "${SSB64_IOS_BUNDLE_ID}"
         MACOSX_BUNDLE_BUNDLE_NAME "${SSB64_APP_NAME}"
         XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${SSB64_IOS_BUNDLE_ID}"

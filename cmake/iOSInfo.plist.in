@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleExecutable</key>
+	<string>${MACOSX_BUNDLE_EXECUTABLE_NAME}</string>
+	<key>CFBundleIdentifier</key>
+	<string>${MACOSX_BUNDLE_GUI_IDENTIFIER}</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>${MACOSX_BUNDLE_BUNDLE_NAME}</string>
+	<key>CFBundleDisplayName</key>
+	<string>${MACOSX_BUNDLE_BUNDLE_NAME}</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>${MACOSX_BUNDLE_SHORT_VERSION_STRING}</string>
+	<key>CFBundleVersion</key>
+	<string>${MACOSX_BUNDLE_BUNDLE_VERSION}</string>
+
+	<!-- Declaring a launch screen is what opts the app into the device's
+	     native resolution. Without this key iOS runs the app in legacy
+	     compatibility mode: the window comes back as the original iPhone's
+	     320x480 points (480x320 in landscape) scaled up, no matter what
+	     SDL_CreateWindow asked for. An empty dict is the modern minimal
+	     form — no storyboard file needed. -->
+	<key>UILaunchScreen</key>
+	<dict/>
+
+	<!-- The game renders landscape. Pinning the supported set here stops
+	     UIKit from bringing the scene up portrait and then forcing a
+	     rotation, which showed up in the log as "A new orientation
+	     transaction token is being requested while a valid one already
+	     exists". -->
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+
+	<key>UIRequiresFullScreen</key>
+	<true/>
+	<key>UIStatusBarHidden</key>
+	<true/>
+	<key>UIViewControllerBasedStatusBarAppearance</key>
+	<false/>
+
+	<!-- SDL logs a warning without this and pointer events stay direct-only. -->
+	<key>UIApplicationSupportsIndirectInputEvents</key>
+	<true/>
+
+	<key>UIRequiredDeviceCapabilities</key>
+	<array>
+		<string>arm64</string>
+		<string>metal</string>
+	</array>
+	<key>MinimumOSVersion</key>
+	<string>${CMAKE_OSX_DEPLOYMENT_TARGET}</string>
+</dict>
+</plist>
